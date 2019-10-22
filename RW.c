@@ -3,11 +3,13 @@
 #include <semaphore.h>
 #include <pthread.h>
 #include <sys/time.h>
+#include <unistd.h>
 
 #define WRITER_THREAD 10
 #define READER_THREAD 500
 
-
+#define READER_REPEAT 60
+#define WRITER_REPEAT 30
 
 static sem_t rw_mutex; //used by both reader and writer threads, mutual exclusion for writers
 static sem_t  mutex; //ensure mutual exclusion when read_count is updated
@@ -21,8 +23,10 @@ void *thread_function (void *arg) {
 }
 
 
-void *writer(void *arg) { 
-	do {
+void *writer(char *loop) { 
+
+	
+	for (int i = 0; i < 10; i++) {
 		sem_wait(&rw_mutex);
 
 		Shared+= 10;
@@ -30,18 +34,18 @@ void *writer(void *arg) {
 		fflush(stdout);
 		
 		sem_post(&rw_mutex);
+		usleep(1000);
 
-	} while(1);
-
-	return NULL;
+	}
 
 
+	return NULL;	
 
 }
 
-void *reader(void *arg) { //if continuous flow of readers, writers will starve
-
-	do {
+void *reader(char *loop) { //if continuous flow of readers, writers will starve
+	
+	for (int i = 0; i < 10; i++) {
 		sem_wait(&mutex);
 		read_count++;
 		if (read_count == 1) {
@@ -59,7 +63,9 @@ void *reader(void *arg) { //if continuous flow of readers, writers will starve
 			sem_post(&rw_mutex);
 		}
 		sem_post(&mutex);
-	} while(1);
+		usleep(1000);
+	} 
+
 
 
 	return NULL;
@@ -68,15 +74,13 @@ void *reader(void *arg) { //if continuous flow of readers, writers will starve
 
 
 
-
-
-
-
 }
 
 
-int main (void) {
+int main (int argc, char **argv) {
 	
+	int g = 10;
+//	printf("%s%s\n", argv[1], argv[2]);	
 	sem_init(&mutex, 0,1);
 	sem_init(&rw_mutex,0,1);
 
@@ -85,11 +89,11 @@ int main (void) {
 
 	int s;
 	for (int i = 0; i < WRITER_THREAD; ++i) {
-		pthread_create(&thread_writer[i], NULL, writer, NULL);	
+		pthread_create(&thread_writer[i], NULL, writer(argv[1]), &g);	
 	}
 	
 	for (int y = 0; y < READER_THREAD; ++y) {
-		pthread_create(&thread_reader[y], NULL, reader, NULL);	
+		pthread_create(&thread_reader[y], NULL, reader(argv[2]), &g);	
 	}
 	
 
@@ -104,7 +108,10 @@ int main (void) {
 		pthread_join(thread_reader[i], NULL);
 	}
 	
+
 	
+	sem_destroy(&mutex);
+	sem_destroy(&rw_mutex);	
 	return EXIT_SUCCESS;	
 
 
