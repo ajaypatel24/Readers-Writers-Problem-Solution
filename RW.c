@@ -16,6 +16,8 @@ static sem_t  mutex; //ensure mutual exclusion when read_count is updated
 static int read_count = 0; //how many threads are reading the object
 static int Shared = 0;
 
+int readers;
+int writers;
 void *thread_function (void *arg) {
 	char *msg = arg;
 	printf("%s\n", msg);
@@ -23,10 +25,14 @@ void *thread_function (void *arg) {
 }
 
 
-void *writer(char *loop) { 
-
+void *writer(void *arg) { 
 	
-	for (int i = 0; i < 10; i++) {
+	
+	int number_attempt = *((int *) arg);
+	int attempt = 0;
+	//	printf("attemptwriter: %d\n", number_attempt);
+
+	while (attempt < number_attempt) {
 		sem_wait(&rw_mutex);
 
 		Shared+= 10;
@@ -35,17 +41,19 @@ void *writer(char *loop) {
 		
 		sem_post(&rw_mutex);
 		usleep(1000);
-
+		attempt++;
 	}
 
 
-	return NULL;	
 
 }
 
-void *reader(char *loop) { //if continuous flow of readers, writers will starve
+void *reader(void *arg) { //if continuous flow of readers, writers will starve
 	
-	for (int i = 0; i < 10; i++) {
+	int number_attempt = *((int *) arg);
+	int attempt = 0;
+	//printf("attempt: %d\n", number_attempt);
+	while (attempt < number_attempt) {
 		sem_wait(&mutex);
 		read_count++;
 		if (read_count == 1) {
@@ -64,11 +72,11 @@ void *reader(char *loop) { //if continuous flow of readers, writers will starve
 		}
 		sem_post(&mutex);
 		usleep(1000);
+		attempt++;
 	} 
 
 
 
-	return NULL;
 
 
 
@@ -79,8 +87,10 @@ void *reader(char *loop) { //if continuous flow of readers, writers will starve
 
 int main (int argc, char **argv) {
 	
-	int g = 10;
+//	int g = 10;
 //	printf("%s%s\n", argv[1], argv[2]);	
+	int writer_repeat = atoi(argv[1]);
+	int reader_repeat = atoi(argv[2]);
 	sem_init(&mutex, 0,1);
 	sem_init(&rw_mutex,0,1);
 
@@ -89,11 +99,11 @@ int main (int argc, char **argv) {
 
 	int s;
 	for (int i = 0; i < WRITER_THREAD; ++i) {
-		pthread_create(&thread_writer[i], NULL, writer(argv[1]), &g);	
+		pthread_create(&thread_writer[i], NULL, writer, &writer_repeat);	
 	}
 	
 	for (int y = 0; y < READER_THREAD; ++y) {
-		pthread_create(&thread_reader[y], NULL, reader(argv[2]), &g);	
+		pthread_create(&thread_reader[y], NULL, reader, &reader_repeat);	
 	}
 	
 
