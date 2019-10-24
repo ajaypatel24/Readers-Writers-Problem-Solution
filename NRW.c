@@ -8,36 +8,37 @@
 #define WRITER_THREAD 10
 #define READER_THREAD 500
 
-#define MICRO 1E3
+#define MICRO 1E9
 
-
+typedef enum boolean {false, true} bool;
 static sem_t rw_mutex; //used by both reader and writer threads, mutual exclusion for writers
 static sem_t  mutex; //ensure mutual exclusion when read_count is updated
-static sem_t fair; //ensures ordering of requests
-static int read_count = 0; //how many threads are reading the object
-static int Shared = 0;
+static sem_t fair;
+int ctrin = 0;
+int ctrout = 0;
+bool wait = false;
 
-double MINREADTIME = 1;
+
+
+ 
+static int read_count = 0; //how many threads are reading the object
+static int Shared = 0; //shared integer edited in critical section 
+
+//variables to get statistics 
+double MINREADTIME = 1; 
 double MAXREADTIME = 1;
 double MINWRITETIME = 1;
 double MAXWRITETIME = 1;
-
 double AVERAGEREAD = 0;
 double AVERAGEWRITE = 0;
+
 int readers;
 int writers;
 
-void *thread_function (void *arg) {
-	char *msg = arg;
-	printf("%s\n", msg);
-	return NULL;
-}
 
-int RNG() {
+int RNG() { //generates random number between 0 and 100 for sleep
 	int RandomSleep = rand() % (101);
 	return RandomSleep * 1000;	
-
-
 }
 
 void *writer(void *arg) { 
@@ -45,44 +46,49 @@ void *writer(void *arg) {
 	
 	int number_attempt = *((int *) arg);
 	int attempt = 0;
-	//	printf("attemptwriter: %d\n", number_attempt);
 
-	while (attempt < number_attempt) {
+	while (attempt < number_attempt) { //loop number of times specified in cmd argument
 
-		sem_wait(&fair);
-
-		struct timespec tstart={0,0}, tend={0,0};
-		clock_gettime(CLOCK_MONOTONIC, &tstart);
+		struct timespec tstart={0,0}, tend={0,0}; //initialize timer
+		clock_gettime(CLOCK_MONOTONIC, &tstart); //start timer
 	
+		sem_wait(&mutex);
 		sem_wait(&rw_mutex);
 
-		clock_gettime(CLOCK_MONOTONIC, &tend);
+		clock_gettime(CLOCK_MONOTONIC, &tend); //end timer
 
-		double microsecond = (tend.tv_sec - tstart.tv_sec )+
-			       (tend.tv_nsec - tstart.tv_nsec)
-				 / MICRO;
-		AVERAGEWRITE += microsecond;
+		double microsecond = (MICRO * (tend.tv_sec - tstart.tv_sec) + tend.tv_nsec - tstart.tv_nsec)/1000; //calculate time in microseconds
+		AVERAGEWRITE += microsecond; //add to average
 
 
-		if (microsecond < MINWRITETIME) {
+		if (microsecond < MINWRITETIME) { //adjust min
 			MINWRITETIME = microsecond;
 		}
-		if (microsecond > MAXWRITETIME) {
+		if (microsecond > MAXWRITETIME) { //adjust max
 			MAXWRITETIME = microsecond;
 		}
-		
 
-		sem_post(&fair);
+		if (ctrin == ctrout) {
+			sem_post(&rw_mutex);
+		}
+		else {
+			wait = true;
+			sem_post(&rw_mutex);
+			sem_wait(&fair);
+			wait = false;
+	
+		}
 		//start critical section
 		Shared+= 10;
-		printf("val: %d\n", Shared);
-		fflush(stdout);
 		//end critical section		
 
-		sem_post(&rw_mutex);
-
-		usleep(RNG());
+		
+		 //sleep thread using RNG function
+		sem_post(&mutex);
 		attempt++;
+		int sleep = RNG();
+		usleep(sleep);
+		
 	}
 
 
@@ -95,50 +101,47 @@ void *reader(void *arg) { //if continuous flow of readers, writers will starve
 	int attempt = 0;
 	//printf("attempt: %d\n", number_attempt);
 	while (attempt < number_attempt) {
-
-		sem_wait(&fair);
-
-
-		struct timespec tstart={0,0}, tend={0,0};
-		clock_gettime(CLOCK_MONOTONIC, &tstart);
+		struct timespec tstart={0,0}, tend={0,0}; //initialize timer 
+		clock_gettime(CLOCK_MONOTONIC, &tstart); //start timer
 		
 		sem_wait(&mutex);
 
 		clock_gettime(CLOCK_MONOTONIC, &tend);
+		
+		double microsecond = (MICRO * (tend.tv_sec - tstart.tv_sec) + tend.tv_nsec - tstart.tv_nsec)/1000; //calculate time in microseconds
+		AVERAGEREAD += microsecond; //add to average
 
-		double microsecond = (tend.tv_sec - tstart.tv_sec )+
-			       (tend.tv_nsec - tstart.tv_nsec)
-				 / MICRO;
 
-		AVERAGEREAD += microsecond;
-		if (microsecond < MINREADTIME) {
+		if (microsecond < MINREADTIME) { //adjust min
 			MINREADTIME = microsecond;
 		}
-		if (microsecond > MAXREADTIME) {
+		if (microsecond > MAXREADTIME) { //adjust max
 			MAXREADTIME = microsecond;
 		}
 
-		read_count++;
+		ctrin++;
 
-		if (read_count == 1) {
-			sem_wait(&rw_mutex);
-		}
 
-		sem_post(&fair);
 		sem_post(&mutex);
+
 
 		//start critical section 
 		printf("read: %d\n", Shared);
-		fflush(stdout);	
 		//end critical section		
 
-		sem_wait(&mutex);
-		read_count--;
-		if (read_count == 0) {
-			sem_post(&rw_mutex);
+
+		sem_wait(&rw_mutex);
+		ctrout++;
+		
+
+		if (wait == true && ctrin==ctrout) {
+			sem_post(&fair);
+
 		}
-		sem_post(&mutex);
-		usleep(RNG());
+		sem_post(&rw_mutex);
+	
+		int sleep = RNG();
+		usleep(sleep);
 		attempt++;
 	} 
 
@@ -158,14 +161,15 @@ int main (int argc, char **argv) {
 //	printf("%s%s\n", argv[1], argv[2]);	
 	int writer_repeat = atoi(argv[1]);
 	int reader_repeat = atoi(argv[2]);
-	sem_init(&mutex, 0,1);
+	sem_init(&mutex, 0,1); //initialize semaphores
 	sem_init(&rw_mutex,0,1);
-	sem_init(&fair,0,1);
+	sem_init(&fair, 0,0);
 
+	//initialize threads
 	pthread_t *thread_writer = malloc(sizeof(pthread_t) * WRITER_THREAD);
 	pthread_t *thread_reader = malloc(sizeof(pthread_t) * READER_THREAD);
 
-	int s;
+	//create threads
 	for (int i = 0; i < WRITER_THREAD; ++i) {
 		pthread_create(&thread_writer[i], NULL, writer, &writer_repeat);	
 	}
@@ -177,7 +181,7 @@ int main (int argc, char **argv) {
 
 	
 
-
+	//join threads
 	for (int i = 0; i < WRITER_THREAD; ++i) {
 		pthread_join(thread_writer[i], NULL);
 	}
@@ -191,6 +195,8 @@ int main (int argc, char **argv) {
 	sem_destroy(&mutex);
 	sem_destroy(&rw_mutex);	
 
+
+	//print statistics
 	printf("min read: %f\n", MINREADTIME);
 	printf("max read: %f\n", MAXREADTIME);
 	printf("min write: %f\n", MINWRITETIME);

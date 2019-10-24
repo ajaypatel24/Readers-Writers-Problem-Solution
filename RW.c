@@ -8,7 +8,7 @@
 #define WRITER_THREAD 10
 #define READER_THREAD 500
 
-#define MICRO 1E3
+#define MICRO 1E9
 
 
 static sem_t rw_mutex; //used by both reader and writer threads, mutual exclusion for writers
@@ -48,9 +48,7 @@ void *writer(void *arg) {
 
 		clock_gettime(CLOCK_MONOTONIC, &tend); //end timer
 
-		double microsecond = (tend.tv_sec - tstart.tv_sec )+
-			       (tend.tv_nsec - tstart.tv_nsec)
-				 / MICRO; //calculate time in microseconds
+		double microsecond = (MICRO * (tend.tv_sec - tstart.tv_sec) + tend.tv_nsec - tstart.tv_nsec)/1000; //calculate time in microseconds
 		AVERAGEWRITE += microsecond; //add to average
 
 
@@ -60,15 +58,17 @@ void *writer(void *arg) {
 		if (microsecond > MAXWRITETIME) { //adjust max
 			MAXWRITETIME = microsecond;
 		}
-		
-		//start critical section
+	//start critical section
 		Shared+= 10;
+	//	fflush(stdout);
 		//end critical section		
 
 		sem_post(&rw_mutex);
-
-		usleep(RNG()); //sleep thread using RNG function
+	 //sleep thread using RNG function
 		attempt++;
+			int sleep = RNG();
+		usleep(sleep);
+		
 	}
 
 
@@ -86,11 +86,17 @@ void *reader(void *arg) { //if continuous flow of readers, writers will starve
 		
 		sem_wait(&mutex);
 
+		
+
+		read_count++;
+
+		if (read_count == 1) {
+			sem_wait(&rw_mutex);
+		}
+		sem_post(&mutex);
 		clock_gettime(CLOCK_MONOTONIC, &tend); //end timer
 
-		double microsecond = (tend.tv_sec - tstart.tv_sec )+
-			       (tend.tv_nsec - tstart.tv_nsec)
-				 / MICRO; //time in microseconds
+		double microsecond =( MICRO * (tend.tv_sec - tstart.tv_sec) + tend.tv_nsec - tstart.tv_nsec)/1000; //time in microseconds
 
 		AVERAGEREAD += microsecond; //add to average
 		if (microsecond < MINREADTIME) { //adjust min
@@ -99,17 +105,10 @@ void *reader(void *arg) { //if continuous flow of readers, writers will starve
 		if (microsecond > MAXREADTIME) { //adjust max
 			MAXREADTIME = microsecond;
 		}
-
-		read_count++;
-
-		if (read_count == 1) {
-			sem_wait(&rw_mutex);
-		}
-		sem_post(&mutex);
-
 		//start critical section 
 		printf("read: %d\n", Shared);
-		fflush(stdout);	
+	//	fflush(stdout);	
+//		int h = Shared;
 		//end critical section		
 
 		sem_wait(&mutex);
@@ -118,7 +117,8 @@ void *reader(void *arg) { //if continuous flow of readers, writers will starve
 			sem_post(&rw_mutex);
 		}
 		sem_post(&mutex);
-		usleep(RNG());
+		int sleep = RNG();
+		usleep(sleep);
 		attempt++;
 	} 
 
